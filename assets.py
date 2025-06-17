@@ -59,8 +59,8 @@ async def download_asset(resource_url: str, fetcher, state) -> Optional[str]:
     # Fetch
     status, data = await fetcher.fetch_bytes(abs_url)
     if status == 200 and data:
-        with open(local_path, 'wb') as f:
+        with open(local_path, "wb") as f:
             f.write(data)
-        await state.add_asset(abs_url, local_path)
-        return local_path
-    return None
+    # state.add_asset é síncrono agora
+        state.add_asset(abs_url, local_path)
+    return local_path
