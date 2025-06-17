@@ -59,29 +59,33 @@ class CrawlWorker:
 
     async def run(self):
         while True:
-            url = await self.state.get_next_url()
+            url = self.state.get_next_url()      # ← sem await
             if url is None:
                 break
-            # Fetch page text
+
+            # Fetch a página
             status, html = await self.fetcher.fetch_text(url)
             if status == 200 and html:
                 try:
-                    # Rewrite HTML and save local copy
+                    # Reescreve e grava
                     new_html = await process_html(url, html, self.fetcher, self.state)
                     local_path = url_to_local_path(url)
-                    async with asyncio.to_thread(open, local_path, "w", encoding="utf-8") as f:
-                        f.write(new_html)
-                    await self.state.update_after_fetch(url, True)
+                    await asyncio.to_thread(
+                        lambda p, d: open(p, "w", encoding="utf-8").write(d),
+                        local_path, new_html
+                    )
+                    # Atualiza estado
+                    self.state.update_after_fetch(url, True)
 
-                    # Extract and enqueue new links from original HTML
+                    # Extrai e enfileira novos links
                     soup = BeautifulSoup(html, "html.parser")
                     for a in soup.find_all("a", href=True):
                         href = a["href"]
                         if is_valid_link(href):
                             abs_link = urljoin(BASE_URL, href)
-                            await self.state.add_url(abs_link)
+                            self.state.add_url(abs_link)
 
                 except Exception as e:
-                    await self.state.update_after_fetch(url, False, str(e))
+                    self.state.update_after_fetch(url, False, str(e))
             else:
-                await self.state.update_after_fetch(url, False, f"HTTP {status}")
+                self.state.update_after_fetch(url, False, f"HTTP {status}")

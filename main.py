@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 """
-Main script for ForumSMPT backup crawler.
 Verifica e instala automaticamente aiohttp, PyYAML e beautifulsoup4 se não estiverem presentes.
 """
-import sys
-import subprocess
+
+import os, sys, subprocess
+
+# Suprimir aviso de versão do pip
+os.environ.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
 
 # -------------------- Dependency Check & Installation --------------------
-required_packages = ["aiohttp", "PyYAML", "beautifulsoup4"]
-for pkg in required_packages:
+required = [("aiohttp","aiohttp"), ("PyYAML","PyYAML"), ("beautifulsoup4","bs4")]
+for pkg, imp in required:
     try:
-        __import__(pkg.lower() if pkg != "PyYAML" else "yaml")
+        __import__(imp)
     except ImportError:
-        print(f"[Setup] Instalando dependência em falta: {pkg}")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", pkg])
+        print(f"[Setup] Instalando: {pkg}")
+        subprocess.check_call(
+            [sys.executable, "-m", "pip", "install", pkg, "-q"]
+        )
 
-# Agora seguem os imports normais do script
+# imports normais
+
 import argparse
 import asyncio
 import os
@@ -30,11 +35,12 @@ from crawler import CrawlWorker
 BASE_URL = "https://sm-portugal.forumeiros.com/"
 
 async def periodic_save(state: State, interval: int):
-    """Periodically save state and cache every `interval` seconds."""
     while True:
         await asyncio.sleep(interval)
-        await state.save()
+        # chama o save de modo não-bloqueante
+        await asyncio.to_thread(state.save)
         print("[Auto-save] State and cache saved.")
+
 
 async def main():
     parser = argparse.ArgumentParser(description="Backup ForumSMPTCrawler")
@@ -64,15 +70,35 @@ async def main():
         sys.exit(0)
 
     # Load/set cookies
+# Load existing cookies from cookies.json
     cookies = get_cookies()
-    if not cookies or not args.resume:
-        print("Enter cookies values:")
+
+    # Se houver cookies, testa-os antes de perguntar de novo
+    if cookies:
+        # Cria um fetcher temporário só para testar
+        throttle_test = ThrottleController(config)
+        fetcher_test = Fetcher(config, throttle_test, cookies)
+        status, _ = await fetcher_test.fetch_text(
+            "https://sm-portugal.forumeiros.com/privmsg?folder=inbox",
+            allow_redirects=False
+        )
+        await fetcher_test.close()
+        if status == 200:
+            print("[Cookies] Cookies existentes válidos, usando-os.")
+        else:
+            print("[Cookies] Cookies expirados ou inválidos.")
+            cookies = {}  # força redigitação
+
+    # Se não tiver cookies válidos, pede de novo
+    if not cookies:
+        print("Fornece os 4 cookies (_fa-screen, fa_sm-portugal_forumeiros_com_data,")
+        print("fa_sm-portugal_forumeiros_com_sid e fa_sm-portugal_forumeiros_com_t):")
         cookies["_fa-screen"] = input("_fa-screen: ").strip()
         cookies["fa_sm-portugal_forumeiros_com_data"] = input("fa_sm-portugal_forumeiros_com_data: ").strip()
         cookies["fa_sm-portugal_forumeiros_com_sid"] = input("fa_sm-portugal_forumeiros_com_sid: ").strip()
         cookies["fa_sm-portugal_forumeiros_com_t"] = input("fa_sm-portugal_forumeiros_com_t: ").strip()
         set_cookies(cookies)
-        print("[Cookies] Saved to cookies.json")
+        print("[Cookies] Gravados em cookies.json")
 
     # Initialize state
     state = State(config, state_path=state_file, cache_path=cache_file)
@@ -88,7 +114,8 @@ async def main():
 
     # Seed initial URL if fresh
     if not state.urls:
-        await state.add_url(BASE_URL)
+        state.add_url(BASE_URL)
+
 
     # Initialize throttle and fetcher
     throttle = ThrottleController(config)
