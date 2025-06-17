@@ -42,7 +42,6 @@ async def download_asset(resource_url: str, fetcher, state) -> Optional[str]:
 
     # Default ext if missing
     if not ext:
-        # try guess from MIME
         mime, _ = mimetypes.guess_type(parsed.path)
         ext = mimetypes.guess_extension(mime) or '.bin'
     
@@ -59,8 +58,10 @@ async def download_asset(resource_url: str, fetcher, state) -> Optional[str]:
     # Fetch
     status, data = await fetcher.fetch_bytes(abs_url)
     if status == 200 and data:
-        with open(local_path, "wb") as f:
+        # Write asset data to local file
+        with open(local_path, 'wb') as f:
             f.write(data)
-    # state.add_asset é síncrono agora
+        # Add asset to cache (synchronous call, no await)
         state.add_asset(abs_url, local_path)
-    return local_path
+        return local_path
+    return None

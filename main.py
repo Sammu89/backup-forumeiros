@@ -124,19 +124,19 @@ async def main():
     # Start periodic saving task
     save_task = asyncio.create_task(periodic_save(state, config.save_every * 1))
 
-    # Spawn crawler workers
+    # Spawn crawler workers and run them concurrently
     workers = [CrawlWorker(config, state, fetcher) for _ in range(config.workers)]
-    tasks = [asyncio.create_task(w.run()) for w in workers]
+    tasks   = [asyncio.create_task(w.run()) for w in workers]
 
     # Wait for all workers to finish
     await asyncio.gather(*tasks)
 
     # Cleanup
-    save_task.cancel()
-    await fetcher.close()
-    # state.save é síncrono — chama sem await
-    state.save()
+    save_task.cancel()           # stop periodic auto-save loop
+    await fetcher.close()        # close HTTP session
+    state.save()                 # save state synchronously (no await needed)
     print("Crawl complete. All state saved.")
+
 
 
 
