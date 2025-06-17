@@ -134,8 +134,11 @@ async def main():
     # Cleanup
     save_task.cancel()
     await fetcher.close()
-    await state.save()
+    # state.save é síncrono — chama sem await
+    state.save()
     print("Crawl complete. All state saved.")
+
+
 
 if __name__ == "__main__":
     try:
