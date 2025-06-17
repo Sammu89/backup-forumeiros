@@ -1,0 +1,17 @@
+# Ficheiros sensíveis e de estado
+cookies.json
+crawl_state.json
+assets_cache.json
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Pasta com os backups HTML
+ForumSMPT/assets/
+ForumSMPT/topicos/
+ForumSMPT/categorias/
+ForumSMPT/users/
+ForumSMPT/admin/
+ForumSMPT/grupos/
