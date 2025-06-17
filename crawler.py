@@ -52,6 +52,7 @@ class CrawlWorker:
             try:
                 url = await self.state.get_next_url()
             except Exception as e:
+                traceback.print_exc()          # imprime call-stack completo
                 print(f"[Worker {self.id}] Error retrieving next URL: {e}")
                 url = None
             if url is None:
@@ -66,6 +67,7 @@ class CrawlWorker:
             try:
                 status, html = await self.fetcher.fetch_text(url)
             except Exception as e:
+                traceback.print_exc()          # imprime call-stack completo
                 print(f"[Worker {self.id}] Exception during fetch of {url}: {e}")
                 await self.state.update_after_fetch(url, False, str(e))
                 continue
@@ -89,6 +91,7 @@ class CrawlWorker:
                             new_links_count += 1
                     print(f"[Worker {self.id}] Extracted {new_links_count} new links from {url}")
                 except Exception as e:
+                    traceback.print_exc()          # imprime call-stack completo
                     print(f"[Worker {self.id}] Error processing {url}: {e}")
                     await self.state.update_after_fetch(url, False, str(e))
             else:

@@ -30,7 +30,14 @@ async def download_asset(resource_url: str, fetcher, state) -> Optional[str]:
         return existing
     print(f"[Asset] Downloading: {abs_url}")
     parsed = urlparse(abs_url)
-    _, ext = os.path.splitext(parsed.path)
+    _, ext = os.path.splitext(parsed.path)     # ext = '' se não existir
+    ext = ext.lower()
+
+    # Se continuar vazio, tenta adivinhar
+    if not ext:
+        mime, _ = mimetypes.guess_type(parsed.path)
+        guessed = mimetypes.guess_extension(mime or '')   # pode vir None
+        ext = guessed.lower() if guessed else '.bin' 
     ext = ext.lower()
     is_image = ext in IMAGE_EXTS
     if not ext:
