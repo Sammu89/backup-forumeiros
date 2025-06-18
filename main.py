@@ -149,6 +149,7 @@ async def main():
 
         # Import DiscoverWorker (assumindo que existe no módulo crawler)
         from crawler import DiscoverWorker
+        max_workers = 10   # total de crawlers de descoberta desejados
 
         # Começamos apenas com 1 DiscoverWorker
         discover_tasks = []
@@ -170,8 +171,8 @@ async def main():
 
             # Caso o worker 1 acabe antes de chegar a 20 links, lançamos os outros mesmo assim
             if discover_tasks[0].done() and not additional_started:
-                print("[Phase-1] Lista estabilizou antes dos 20 links → lançando restantes.")
-                for i in range(2, config.workers + 1):
+                print(f"[Phase-1] Lista estabilizou antes dos 20 links → lançando até {max_workers} crawlers.")
+                for i in range(2, max_workers + 1):
                     w = DiscoverWorker(config, state, fetcher, worker_id=i)
                     discover_tasks.append(asyncio.create_task(w.run()))
                 additional_started = True
@@ -226,14 +227,15 @@ async def main():
     print("Crawl complete. All state saved.")
 
 if __name__ == "__main__":
+    fetcher = None  # Initialize fetcher variable for finally block
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nInterrupted. Exiting.")
     finally:
-        # if you have a global fetcher, close it here
-        try:
-            asyncio.run(fetcher.close())
-        except:
-            pass
-
+        # Close fetcher if it exists
+        if 'fetcher' in locals() and fetcher is not None:
+            try:
+                asyncio.run(fetcher.close())
+            except:
+                pass
