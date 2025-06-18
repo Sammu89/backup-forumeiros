@@ -27,29 +27,44 @@ def strip_fragment(url: str) -> str:
 
 def is_valid_link(href: str) -> bool:
     """
-    Decide if an <a href> is an internal link we should queue:
-    - Skip anchors, mailto, javascript.
-    - Must be in our BASE_DOMAIN.
-    - Must not start with admin/modcp/profile.
-    - Only allow certain query params.
+    Determine if an href should be included in the crawl:
+    - Must be within BASE_URL domain.
+    - Must not be an action (e.g. mode=reply).
+    - Ignore admin/modcp/profile.
+    - Only allow query params in ALLOWED_PARAMS.
     """
-    if href.startswith(("#", "mailto:", "javascript:")):
+    # descartar âncoras, mailto e javascript
+    if href.startswith("#") or href.startswith("mailto:") or href.startswith("javascript:"):
         return False
-    abs_url = urljoin(BASE_URL, href)
-    no_frag = strip_fragment(abs_url)
-    p = urlparse(no_frag)
 
-    if p.path.startswith(IGNORED_PREFIXES):
+    # tenta normalizar URL; se falhar, ignora
+    try:
+        abs_url = urljoin(BASE_URL, href)
+        base_no_frag = strip_fragment(abs_url)
+        parsed = urlparse(base_no_frag)
+    except Exception:
         return False
-    if p.netloc != BASE_DOMAIN:
+
+    # ignora paths de admin, modcp, profile
+    if parsed.path.startswith(IGNORED_PREFIXES):
         return False
-    if not p.query:
+
+    # domínio deve casar exatamente
+    if parsed.netloc != BASE_DOMAIN:
+        return False
+
+    # permite caminhos sem query
+    if not parsed.query:
         return True
-    params = dict(parse_qsl(p.query))
-    for k in params:
-        if k in BLACKLIST_PARAMS or k not in ALLOWED_PARAMS:
+
+    # senão, valida os parâmetros
+    params = dict(parse_qsl(parsed.query))
+    for key in params:
+        if key in BLACKLIST_PARAMS or key not in ALLOWED_PARAMS:
             return False
+
     return True
+
 
 
 def url_to_local_path(url: str) -> str:
