@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-import os, sys, subprocess
+import os
+import sys
+import subprocess
 
 # Suppress pip version check
 os.environ.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
 
 # Dependency check and installation (if needed)
-required = [("aiohttp", "aiohttp"), ("PyYAML", "bs4"), ("beautifulsoup4", "bs4")]
+required = [("aiohttp", "aiohttp"), ("PyYAML", "PyYAML"), ("beautifulsoup4", "bs4"), ("tqdm", "tqdm")]
 for pkg, imp in required:
     try:
         __import__(imp)
@@ -15,8 +17,6 @@ for pkg, imp in required:
 
 import argparse
 import asyncio
-import os
-import sys
 
 from config import load_config, get_cookies, set_cookies
 from state import State
@@ -26,19 +26,31 @@ from crawler import CrawlWorker
 
 BASE_URL = "https://sm-portugal.forumeiros.com/"
 
+
 async def periodic_save(state: State, interval: int):
     while True:
         await asyncio.sleep(interval)
         await state.save()
         print("[Auto-save] State and cache saved.")
 
+
 async def main():
     parser = argparse.ArgumentParser(description="Backup ForumSMPTCrawler")
-    parser.add_argument("--resume", action="store_true", help="Resume from existing state")
-    parser.add_argument("--reset", action="store_true", help="Reset state and start fresh")
-    parser.add_argument("--status", action="store_true", help="Show crawl status and exit")
-    parser.add_argument("--workers", type=int, help="Override number of concurrent workers")
-    parser.add_argument("--delay", type=float, help="Override base delay between requests")
+    parser.add_argument(
+        "--resume", action="store_true", help="Resume from existing state"
+    )
+    parser.add_argument(
+        "--reset", action="store_true", help="Reset state and start fresh"
+    )
+    parser.add_argument(
+        "--status", action="store_true", help="Show crawl status and exit"
+    )
+    parser.add_argument(
+        "--workers", type=int, help="Override number of concurrent workers"
+    )
+    parser.add_argument(
+        "--delay", type=float, help="Override base delay between requests"
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -63,7 +75,7 @@ async def main():
         fetcher_test = Fetcher(config, throttle_test, cookies)
         status, _ = await fetcher_test.fetch_text(
             "https://sm-portugal.forumeiros.com/privmsg?folder=inbox",
-            allow_redirects=False
+            allow_redirects=False,
         )
         await fetcher_test.close()
         if status == 200:
@@ -71,14 +83,21 @@ async def main():
         else:
             print("[Cookies] Cookies expired or invalid.")
             cookies = {}
+
     # Prompt for cookies if not valid
     if not cookies:
         print("Provide the 4 cookies (_fa-screen, fa_sm-portugal_forumeiros_com_data,")
         print("fa_sm-portugal_forumeiros_com_sid, fa_sm-portugal_forumeiros_com_t):")
         cookies["_fa-screen"] = input("_fa-screen: ").strip()
-        cookies["fa_sm-portugal_forumeiros_com_data"] = input("fa_sm-portugal_forumeiros_com_data: ").strip()
-        cookies["fa_sm-portugal_forumeiros_com_sid"] = input("fa_sm-portugal_forumeiros_com_sid: ").strip()
-        cookies["fa_sm-portugal_forumeiros_com_t"] = input("fa_sm-portugal_forumeiros_com_t: ").strip()
+        cookies["fa_sm-portugal_forumeiros_com_data"] = input(
+            "fa_sm-portugal_forumeiros_com_data: "
+        ).strip()
+        cookies["fa_sm-portugal_forumeiros_com_sid"] = input(
+            "fa_sm-portugal_forumeiros_com_sid: "
+        ).strip()
+        cookies["fa_sm-portugal_forumeiros_com_t"] = input(
+            "fa_sm-portugal_forumeiros_com_t: "
+        ).strip()
         set_cookies(cookies)
         print("[Cookies] Saved to cookies.json")
 
@@ -91,7 +110,9 @@ async def main():
         done = sum(1 for v in state.urls.values() if v["status"] == "done")
         pending = sum(1 for v in state.urls.values() if v["status"] == "pending")
         errors = sum(1 for v in state.urls.values() if v["status"] == "error")
-        print(f"Total URLs: {total}, Done: {done}, Pending: {pending}, Errors: {errors}")
+        print(
+            f"Total URLs: {total}, Done: {done}, Pending: {pending}, Errors: {errors}"
+        )
         sys.exit(0)
 
     # Seed initial URL if starting fresh
@@ -103,23 +124,69 @@ async def main():
     fetcher = Fetcher(config, throttle, cookies)
     print(f"[Init] Starting crawl with {config.workers} workers...")
 
-    # Start periodic state save task
-    save_task = asyncio.create_task(periodic_save(state, config.save_every))
+    # -------------------- FASE 1: DISCOVERY --------------------
+    print("[Phase-1] Discovering links...")
 
-    # Launch crawl workers
-    workers = [CrawlWorker(config, state, fetcher, worker_id=i+1) for i in range(config.workers)]
-    tasks = [asyncio.create_task(w.run()) for w in workers]
+    # Import DiscoverWorker (assumindo que existe no módulo crawler)
+    from crawler import DiscoverWorker
 
-    await asyncio.gather(*tasks)
+    # Começamos apenas com 1 DiscoverWorker
+    discover_tasks = []
+    first_worker = DiscoverWorker(config, state, fetcher, worker_id=1)
+    discover_tasks.append(asyncio.create_task(first_worker.run()))
 
-    # Cleanup after crawling completes
-    save_task.cancel()
-    await fetcher.close()
+    additional_started = False
+
+    # Monitoriza a fila a cada segundo
+    while not additional_started:
+        await asyncio.sleep(1)
+        pending = state.pending_count()  # novo método em state.py
+        if pending >= 20:
+            print(f"[Phase-1] {pending} links pendentes → activando restantes workers…")
+            for i in range(2, config.workers + 1):
+                w = DiscoverWorker(config, state, fetcher, worker_id=i)
+                discover_tasks.append(asyncio.create_task(w.run()))
+            additional_started = True
+
+        # Caso o worker 1 acabe antes de chegar a 20 links, lançamos os outros mesmo assim
+        if discover_tasks[0].done() and not additional_started:
+            print("[Phase-1] Lista estabilizou antes dos 20 links → lançando restantes.")
+            for i in range(2, config.workers + 1):
+                w = DiscoverWorker(config, state, fetcher, worker_id=i)
+                discover_tasks.append(asyncio.create_task(w.run()))
+            additional_started = True
+
+    # Espera todos os DiscoverWorkers terminarem
+    await asyncio.gather(*discover_tasks)
+    print("[Phase-1] Descoberta terminada.")
+
+    # -------------------- FASE 2: DOWNLOAD --------------------
     try:
-        await state.save()
-    except Exception as e:
-        print(f"[Error] Exception during final save: {e}")
+        from tqdm.asyncio import tqdm  # garante pip install tqdm
+    except ImportError:
+        print("[Setup] Installing: tqdm")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "tqdm", "-q"])
+        from tqdm.asyncio import tqdm
+
+    # Import DownloadWorker (assumindo que existe no módulo crawler)
+    from crawler import DownloadWorker
+
+    to_download = sum(1 for v in state.urls.values() if v["status"] == "discovered")
+    print(f"[Phase-2] Need to download {to_download} pages...")
+    progress = tqdm(total=to_download, unit="page")
+
+    download_workers = [
+        DownloadWorker(config, state, fetcher, progress, worker_id=i + 1)
+        for i in range(config.workers)
+    ]
+    await asyncio.gather(*[asyncio.create_task(w.run()) for w in download_workers])
+    progress.close()
+
+    # -------------------- FIM & LIMPEZA --------------------
+    await state.save()
+    await fetcher.close()
     print("Crawl complete. All state saved.")
+
 
 if __name__ == "__main__":
     try:

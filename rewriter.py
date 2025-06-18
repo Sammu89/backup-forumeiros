@@ -26,13 +26,16 @@ def url_to_local_path(url: str) -> str:
     parsed = urlparse(url)
     path = parsed.path.lstrip('/')
     slug = path.replace('/', '_')
+    
     if parsed.query:
         parts = parse_qsl(parsed.query)
         qp = '_'.join(f"{k}-{v}" for k, v in parts)
         slug = f"{slug}_{qp}"
+    
     first_seg = path.split('/', 1)[0]
     folder = PREFIX_MAP.get(first_seg, 'misc')
     filename = f"{slug}.html"
+    
     local_dir = os.path.join(OUTPUT_DIR, folder)
     os.makedirs(local_dir, exist_ok=True)
     return os.path.join(local_dir, filename)
@@ -44,7 +47,7 @@ async def process_html(url: str, html: str, fetcher, state) -> str:
     """
     soup = BeautifulSoup(html, 'html.parser')
     base_path = os.path.dirname(url_to_local_path(url))
-
+    
     # Process images
     for img in soup.find_all('img', src=True):
         src = img['src']
@@ -53,7 +56,7 @@ async def process_html(url: str, html: str, fetcher, state) -> str:
         if local:
             rel = os.path.relpath(local, base_path)
             img['src'] = rel
-
+    
     # Process stylesheets
     for link in soup.find_all('link', href=True):
         if 'stylesheet' in (link.get('rel') or []):
@@ -63,7 +66,7 @@ async def process_html(url: str, html: str, fetcher, state) -> str:
             if local:
                 rel = os.path.relpath(local, base_path)
                 link['href'] = rel
-
+    
     # Process scripts
     for script in soup.find_all('script', src=True):
         src = script['src']
@@ -72,17 +75,25 @@ async def process_html(url: str, html: str, fetcher, state) -> str:
         if local:
             rel = os.path.relpath(local, base_path)
             script['src'] = rel
-
+    
     # Rewrite internal links
     for a in soup.find_all('a', href=True):
         href = a['href']
         if href.startswith('#') or href.startswith('mailto:') or href.startswith('javascript:'):
             continue
+        
         abs_href = href if href.startswith('http') else urljoin(url, href)
-        parsed = urlparse(abs_href)
-        if parsed.netloc.endswith('sm-portugal.forumeiros.com'):
-            target = url_to_local_path(abs_href)
-            rel = os.path.relpath(target, base_path)
+        
+        # 1) separa fragmento
+        base, *frag = abs_href.split('#', 1)
+        parsed = urlparse(base)
+        
+        if parsed.netloc.endswith(BASE_DOMAIN):
+            local_target = url_to_local_path(base)
+            rel = os.path.relpath(local_target, base_path)
+            # 2) reanexa o anchor se existir
+            if frag:
+                rel = f"{rel}#{frag[0]}"
             a['href'] = rel
-
+    
     return str(soup)

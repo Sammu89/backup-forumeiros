@@ -1,7 +1,20 @@
 import os
 import json
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 import asyncio
+
+# ─── Compact persistence ──────────────────────────────────────────────────────
+# p=pending • i=in_progress • l=listed(discovered) • d=downloaded • e=error
+CODE2TEXT = {"p": "pending", "i": "in_progress", "l": "listed",
+             "d": "downloaded", "e": "error"}
+TEXT2CODE = {v: k for k, v in CODE2TEXT.items()}
+
+def base_path(full_url: str) -> str:
+    """Return only '/f1…' part – drop scheme, host and fragment."""
+    parsed = urlparse(full_url)
+    return parsed.path + ("?" + parsed.query if parsed.query else "")
+
 
 class State:
     """
@@ -15,6 +28,7 @@ class State:
         ...
     }
     """
+    
     def __init__(self, config, state_path: Optional[str] = None, cache_path: Optional[str] = None):
         self.config = config
         self.state_path = state_path or os.path.join(os.getcwd(), "crawl_state.json")
@@ -26,63 +40,94 @@ class State:
         self._load()
 
     def _load(self):
-        # Load crawl_state.json
         if os.path.exists(self.state_path):
             with open(self.state_path, "r", encoding="utf-8") as f:
-                try:
-                    entries: List[List] = json.load(f)
-                except json.JSONDecodeError:
-                    entries = []
-            for url, status, retries, last_error in entries:
-                # If any URL was left in progress (e.g., after an interrupted crawl), reset it to pending
-                if status == "in_progress":
-                    status = "pending"
-                self.urls[url] = {
-                    "status": status,
-                    "retries": retries,
-                    "last_error": last_error,
-                }
-        # Load assets_cache.json
+                for line in f:
+                    path, code, retries, last_err = json.loads(line)
+                    # reset in_progress to pending on startup
+                    code = "p" if code == "i" else code
+                    self.urls[path] = {
+                        "status": CODE2TEXT[code],
+                        "retries": retries,
+                        "last_error": last_err,
+                    }
+
         if os.path.exists(self.cache_path):
             with open(self.cache_path, "r", encoding="utf-8") as f:
-                try:
-                    self.assets_cache = json.load(f)
-                except json.JSONDecodeError:
-                    self.assets_cache = {}
+                self.assets_cache = json.load(f)
 
-    async def save(self):
-        """Persist crawl state and asset cache to disk asynchronously."""
-        # Prepare snapshot of current state
-        entries = [
-            [url, data["status"], data["retries"], data["last_error"]]
-            for url, data in self.urls.items()
-        ]
-        assets_data = dict(self.assets_cache)
-        try:
-            # Write files in a separate thread to avoid blocking
-            def write_state_and_cache(entries_data, assets_data_local):
-                with open(self.state_path, "w", encoding="utf-8") as sf:
-                    json.dump(entries_data, sf, ensure_ascii=False)
-                with open(self.cache_path, "w", encoding="utf-8") as cf:
-                    json.dump(assets_data_local, cf, ensure_ascii=False)
-            await asyncio.to_thread(write_state_and_cache, entries, assets_data)
-            self.change_count = 0
-        except Exception as e:
-            print(f"[State] Error saving state to disk: {e}")
+    async def save(self, sort_after: bool = False):
+        """
+        Persist crawl_state.json (one JSON entry per line) and assets_cache.json,
+        optionally sorting the state file after every 1000 entries.
+        """
+        # 1) Build the lines to write
+        lines = []
+        for path, data in self.urls.items():
+            code = TEXT2CODE[data["status"]]
+            retries = data["retries"]
+            err = data["last_error"]
+            lines.append(json.dumps([path, code, retries, err], ensure_ascii=False))
+
+        # 2) Sort if requested
+        if sort_after:
+            lines.sort()
+
+        # 3) Write both files in one thread-call, closing files properly
+        def _write_files():
+            # ensure parent dir exists
+            os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
+            with open(self.state_path, "w", encoding="utf-8") as sf:
+                sf.write("\n".join(lines))
+            with open(self.cache_path, "w", encoding="utf-8") as cf:
+                json.dump(self.assets_cache, cf, ensure_ascii=False)
+
+        await asyncio.to_thread(_write_files)
+        self.change_count = 0
 
     async def _maybe_save(self):
-        """Save state to disk if change_count has reached the threshold."""
+        """
+        Auto‐save when change_count threshold hit; 
+        trigger sort every time pending_count() % 1000 == 0
+        """
         if self.change_count >= self.config.save_every:
-            await self.save()
-            print(f"[Auto-save] Reached {self.config.save_every} changes, state and cache saved.")
+            sort_flag = self.pending_count() % 1000 == 0
+            await self.save(sort_after=sort_flag)
+            if sort_flag:
+                print("[State] crawl_state.json sorted alphabetically.")
 
     async def add_url(self, url: str):
-        """Add a new URL as pending if not already seen."""
         if url not in self.urls:
             self.urls[url] = {"status": "pending", "retries": 0, "last_error": None}
             self.change_count += 1
-            print(f"[State] Added URL to queue: {url}")
             await self._maybe_save()
+
+    # called when HTML fetched & links extracted
+    async def mark_discovered(self, path: str):
+        entry = self.urls.get(path)
+        if entry and entry["status"] != "downloaded":
+            entry["status"] = "listed"   # ou código "l" consoante optaste
+            self.change_count += 1
+            await self._maybe_save()
+
+    # called after rewrite + asset download
+    async def mark_downloaded(self, path: str):
+        entry = self.urls.get(path)
+        if entry:
+            entry["status"] = "downloaded"   # ou "d"
+            entry["last_error"] = None
+            self.change_count += 1
+            await self._maybe_save()
+
+    async def get_next(self, phase: str):
+        wanted = "pending" if phase == "discover" else "listed"
+        for url, data in self.urls.items():
+            if data["status"] == wanted:
+                data["status"] = "in_progress"
+                self.change_count += 1
+                await self._maybe_save()
+                return url
+        return None
 
     async def get_next_url(self) -> Optional[str]:
         """Retrieve the next pending URL and mark it in progress (returns None if none pending)."""
@@ -119,6 +164,10 @@ class State:
     def get_asset(self, resource_url: str) -> Optional[str]:
         """If asset URL already downloaded, return local path, else None."""
         return self.assets_cache.get(resource_url)
+
+    def pending_count(self) -> int:
+        """Return the number of URLs still in 'pending' status."""
+        return sum(1 for v in self.urls.values() if v["status"] == "pending")
 
     async def add_asset(self, resource_url: str, local_path: str):
         """Record a downloaded asset in the cache (if not already recorded)."""
