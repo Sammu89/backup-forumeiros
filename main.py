@@ -7,7 +7,7 @@ import subprocess
 os.environ.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
 
 # Dependency check and installation (if needed)
-required = [("aiohttp", "aiohttp"), ("PyYAML", "PyYAML"), ("beautifulsoup4", "bs4"), ("tqdm", "tqdm")]
+required = [("aiohttp", "aiohttp"), ("PyYAML", "yaml"), ("beautifulsoup4", "bs4"), ("tqdm", "tqdm")]
 for pkg, imp in required:
     try:
         __import__(imp)
