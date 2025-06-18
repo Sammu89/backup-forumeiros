@@ -36,7 +36,7 @@ class State:
         self.urls: Dict[str, Dict] = {}
         self.assets_cache: Dict[str, str] = {}
         self.change_count = 0
-        # Load state from disk
+        self._save_lock = asyncio.Lock()   # <── NOVO
         self._load()
 
     def _load(self):
@@ -60,30 +60,33 @@ class State:
         """
         Persist crawl_state.json (one JSON entry per line) and assets_cache.json,
         optionally sorting the state file after every 1000 entries.
+        A single asyncio.Lock serialises writes to avoid OSError 22 on Windows.
         """
         # 1) Build the lines to write
         lines = []
         for path, data in self.urls.items():
-            code = TEXT2CODE[data["status"]]
+            code    = TEXT2CODE[data["status"]]
             retries = data["retries"]
-            err = data["last_error"]
+            err     = data["last_error"]
             lines.append(json.dumps([path, code, retries, err], ensure_ascii=False))
 
         # 2) Sort if requested
         if sort_after:
             lines.sort()
 
-        # 3) Write both files in one thread-call, closing files properly
-        def _write_files():
-            # ensure parent dir exists
-            os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
-            with open(self.state_path, "w", encoding="utf-8") as sf:
-                sf.write("\n".join(lines))
-            with open(self.cache_path, "w", encoding="utf-8") as cf:
-                json.dump(self.assets_cache, cf, ensure_ascii=False)
+        # 3) Write both files under the lock (single writer)
+        async with self._save_lock:          # ← only two new lines
+            def _write_files():
+                os.makedirs(os.path.dirname(self.state_path), exist_ok=True)
+                with open(self.state_path, "w", encoding="utf-8") as sf:
+                    sf.write("\n".join(lines))
+                with open(self.cache_path, "w", encoding="utf-8") as cf:
+                    json.dump(self.assets_cache, cf, ensure_ascii=False)
 
-        await asyncio.to_thread(_write_files)
+            await asyncio.to_thread(_write_files)  # ← now indented inside the lock
+
         self.change_count = 0
+
 
     async def _maybe_save(self):
         """
