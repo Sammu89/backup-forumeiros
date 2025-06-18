@@ -149,7 +149,7 @@ async def main():
 
         # Import DiscoverWorker (assumindo que existe no módulo crawler)
         from crawler import DiscoverWorker
-        max_workers = 10   # total de crawlers de descoberta desejados
+        max_workers = 7   # total de crawlers de descoberta desejados
 
         # Começamos apenas com 1 DiscoverWorker
         discover_tasks = []
