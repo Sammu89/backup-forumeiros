@@ -24,23 +24,25 @@ class Fetcher:
             headers = {"User-Agent": self.config.user_agent}
             self.session = aiohttp.ClientSession(timeout=timeout, headers=headers, cookies=self.cookies)
 
-    async def fetch_text(self, url: str, allow_redirects: bool = True) -> Tuple[int, Optional[str]]:
+    async def fetch_text(self, url: str, allow_redirects: bool = True) -> Tuple[int, Optional[str], str]:
         """
         Fetch text content (HTML) from the URL.
-        Returns (status_code, text or None on error).
+        Returns (status_code, text or None on error, final_url).
         """
         await self._ensure_session()
         await self.throttle.before_request()
         try:
             async with self.session.get(url, allow_redirects=allow_redirects) as response:
-                self.last_final_url = str(response.url)   # <── new line
+                status = response.status
+                self.last_final_url = str(response.url)
                 text = await response.text(errors="ignore")
         except Exception as e:
             # Treat exceptions as server error
             status = 500
             text = None
+            self.last_final_url = url
         self.throttle.after_response(status)
-        return status, text
+        return status, text, self.last_final_url
 
     async def fetch_bytes(self, url: str) -> Tuple[int, Optional[bytes]]:
         """

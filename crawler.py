@@ -39,7 +39,7 @@ def is_valid_link(href: str) -> bool:
     abs_url = urljoin(BASE_URL, href)
     base_no_frag = strip_fragment(abs_url)
     parsed = urlparse(base_no_frag)
-        # ignore certain admin/profile/modcp paths entirely
+    # ignore certain admin/profile/modcp paths entirely
     if parsed.path.startswith(IGNORED_PREFIXES):
         return False
 
@@ -52,7 +52,6 @@ def is_valid_link(href: str) -> bool:
         if key in BLACKLIST_PARAMS or key not in ALLOWED_PARAMS:
             return False
     return True
-
 
 def url_to_local_path(url: str) -> str:
     """Convert URL to local file path for saving."""
@@ -76,16 +75,15 @@ def url_to_local_path(url: str) -> str:
         folder = "profile"
     else:
         folder = "misc"
-    
+
     slug = path.replace("/", "_") if path else "index"
     if parsed.query:
         slug += "_" + parsed.query.replace("=", "-").replace("&", "_")
-    
+
     outfile = f"{slug}.html"
     local_dir = os.path.join(OUTPUT_DIR, folder)
     os.makedirs(local_dir, exist_ok=True)
     return os.path.join(local_dir, outfile)
-
 
 class CrawlWorker:
     """
@@ -105,7 +103,7 @@ class CrawlWorker:
                 traceback.print_exc()
                 print(f"[Worker {self.id}] Error retrieving next URL: {e}")
                 url = None
-            
+
             if url is None:
                 if any(data["status"] == "in_progress" for data in list(self.state.urls.values())):
                     print(f"[Worker {self.id}] No URL to crawl right now, waiting for new tasks...")
@@ -114,48 +112,41 @@ class CrawlWorker:
                 else:
                     print(f"[Worker {self.id}] No more URLs to crawl. Worker stopping.")
                     break
-            
+
             print(f"[Worker {self.id}] Fetching: {url}")
             try:
                 status, html, final_url = await self.fetcher.fetch_text(url)
-            #— HANDLE INTERNAL REDIRECTS —
-if status in (301,302) or final_url != url:
-    parsed_orig = urlparse(url)
-    parsed_fin  = urlparse(final_url)
-    if parsed_orig.netloc == parsed_fin.netloc:
-        src = parsed_orig.path + (f"?{parsed_orig.query}" if parsed_orig.query else "")
-        dst = parsed_fin.path   + (f"?{parsed_fin.query}"  if parsed_fin.query  else "")
-        await redirects.add(src, dst)
-        # enqueue final URL if new
-        await self.state.add_url(dst)
-        # mark original done
-        await self.state.update_after_fetch(src, True)
-        print(f"[DiscoverWorker {self.id}] Redirect: {src} → {dst}")
-        continue   # skip normal parsing of html under old URL
-    
-            # Detect final URL after redirects (aiohttp gives response.url)
-            final_url = str(self.fetcher.last_final_url)  # we'll add this attr below
-            if final_url != url:
-                src_path  = urlparse(url).path + ("?"+urlparse(url).query if urlparse(url).query else "")
-                dst_path  = urlparse(final_url).path + ("?"+urlparse(final_url).query if urlparse(final_url).query else "")
-                await redirects.add(src_path, dst_path)
-                # make sure we use only the destination in state
-                await self.state.add_url(dst_path)
-                await self.state.update_after_fetch(src_path, True)  # mark original as done/ignored
-                url = final_url         # continue processing with the real page
-                print(f"[Redirect] {src_path} → {dst_path}")
-    
-                
-                
-                
-                
-                
+                #— HANDLE INTERNAL REDIRECTS —
+                if status in (301, 302) or final_url != url:
+                    parsed_orig = urlparse(url)
+                    parsed_fin = urlparse(final_url)
+                    if parsed_orig.netloc == parsed_fin.netloc:
+                        src = parsed_orig.path + (f"?{parsed_orig.query}" if parsed_orig.query else "")
+                        dst = parsed_fin.path + (f"?{parsed_fin.query}"  if parsed_fin.query  else "")
+                        await redirects.add(src, dst)
+                        # enqueue final URL if new
+                        await self.state.add_url(dst)
+                        # mark original done
+                        await self.state.update_after_fetch(src, True)
+                        print(f"[DiscoverWorker {self.id}] Redirect: {src} → {dst}")
+                        continue   # skip normal parsing of html under old URL
+                # Detect final URL after redirects
+                final_url = str(self.fetcher.last_final_url)
+                if final_url != url:
+                    src_path = urlparse(url).path + ("?"+urlparse(url).query if urlparse(url).query else "")
+                    dst_path = urlparse(final_url).path + ("?"+urlparse(final_url).query if urlparse(final_url).query else "")
+                    await redirects.add(src_path, dst_path)
+                    # make sure we use only the destination in state
+                    await self.state.add_url(dst_path)
+                    await self.state.update_after_fetch(src_path, True)  # mark original as done/ignored
+                    url = final_url         # continue processing with the real page
+                    print(f"[Redirect] {src_path} → {dst_path}")
             except Exception as e:
                 traceback.print_exc()
                 print(f"[Worker {self.id}] Exception during fetch of {url}: {e}")
                 await self.state.update_after_fetch(url, False, str(e))
                 continue
-            
+
             if status == 200 and html:
                 print(f"[Worker {self.id}] Fetched {url} (status {status}, {len(html)} bytes)")
                 try:
@@ -166,7 +157,7 @@ if status in (301,302) or final_url != url:
                     await asyncio.to_thread(self._save_file, local_path, new_html)
                     print(f"[Worker {self.id}] Saved page: {url} -> {local_path}")
                     await self.state.update_after_fetch(url, True)
-                    
+
                     # Extract new links
                     soup = BeautifulSoup(html, "html.parser")
                     new_links_count = 0
@@ -177,7 +168,6 @@ if status in (301,302) or final_url != url:
                             await self.state.add_url(abs_link)
                             new_links_count += 1
                     print(f"[Worker {self.id}] Extracted {new_links_count} new links from {url}")
-                    
                 except Exception as e:
                     traceback.print_exc()
                     print(f"[Worker {self.id}] Error processing {url}: {e}")
@@ -191,50 +181,48 @@ if status in (301,302) or final_url != url:
         with open(path, "w", encoding="utf-8") as f:
             f.write(data)
 
-
 class DiscoverWorker:
     """Phase-1: crawl only to enumerate links."""
-    
     def __init__(self, config, state: State, fetcher: Fetcher, worker_id: int = 0):
         self.config = config
         self.state = state
         self.fetcher = fetcher
         self.id = worker_id
-    
+
     async def run(self):
         empty_checks = 0
-        max_empty_checks = 20  # 20 tentativas * 0,5 s ≈ 10 s de margem
+        max_empty_checks = 20  # 20 attempts * 0.5 s ≈ 10 s margin
 
         while True:
             path = await self.state.get_next("discover")
             url = urljoin(BASE_URL, path) if path else None
             if url is None:
                 empty_checks += 1
-                # Se já fez 20 tentativas sem novo URL, sai
+                # If already made 20 tries with no new URL, exit
                 if empty_checks >= max_empty_checks:
                     print(f"[DiscoverWorker {self.id}] Fim da fila. Worker a parar.")
                     break
                 await asyncio.sleep(0.5)
-                continue  # volta a tentar
+                continue
 
-            empty_checks = 0  # reset porque encontrou trabalho
+            empty_checks = 0  # reset because found work
             print(f"[DiscoverWorker {self.id}] {url}")
-            
+
             try:
                 status, html, final_url = await self.fetcher.fetch_text(url)
-                if status in (301,302) or final_url != url:
-    po = urlparse(url); pf = urlparse(final_url)
-    src = po.path + (f"?{po.query}" if po.query else "")
-    dst = pf.path + (f"?{pf.query}" if pf.query else "")
-    await redirects.add(src, dst)
-    # process & save under final_url
-    rewritten = await process_html(final_url, html, self.fetcher, self.state)
-    local = url_to_local_path(final_url)
-    await asyncio.to_thread(self._save_file, local, rewritten)
-    await self.state.mark_downloaded(dst)
-    await self.state.update_after_fetch(src, True)
-    print(f"[DownloadWorker {self.id}] Redirected download: {src} → {dst}")
-    continue
+                if status in (301, 302) or final_url != url:
+                    po = urlparse(url); pf = urlparse(final_url)
+                    src = po.path + (f"?{po.query}" if po.query else "")
+                    dst = pf.path + (f"?{pf.query}" if pf.query else "")
+                    await redirects.add(src, dst)
+                    # process & save under final_url
+                    rewritten = await process_html(final_url, html, self.fetcher, self.state)
+                    local = url_to_local_path(final_url)
+                    await asyncio.to_thread(self._save_file, local, rewritten)
+                    await self.state.mark_downloaded(dst)
+                    await self.state.update_after_fetch(src, True)
+                    print(f"[DownloadWorker {self.id}] Redirected download: {src} → {dst}")
+                    continue
 
                 if status == 200 and html:
                     soup = BeautifulSoup(html, "html.parser")
@@ -246,7 +234,7 @@ class DiscoverWorker:
                             base = strip_fragment(abs_link)
                             await self.state.add_url(urlparse(base).path + ("?"+urlparse(base).query if urlparse(base).query else ""))
                             added += 1
-                    # Marcar esta página como 'l' (listed)
+                    # Mark this page as 'listed'
                     rel_path = urlparse(url).path + ("?"+urlparse(url).query if urlparse(url).query else "")
                     await self.state.mark_discovered(rel_path)
 
@@ -258,17 +246,19 @@ class DiscoverWorker:
                 print(f"[DiscoverWorker {self.id}] Error processing {url}: {e}")
                 await self.state.update_after_fetch(url, False, str(e))
 
+    def _save_file(self, path: str, data: str):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(data)
 
 class DownloadWorker:
     """Phase-2: rewrite HTML, download assets."""
-    
     def __init__(self, config, state: State, fetcher: Fetcher, progress=None, worker_id: int = 0):
         self.config = config
         self.state = state
         self.fetcher = fetcher
         self.progress = progress
         self.id = worker_id
-    
+
     async def run(self):
         while True:
             try:
@@ -276,13 +266,29 @@ class DownloadWorker:
             except Exception as e:
                 print(f"[DownloadWorker {self.id}] Error getting next URL: {e}")
                 url = None
-                
+
             if not url:
                 print(f"[DownloadWorker {self.id}] No more URLs to download. Worker stopping.")
                 break
-                
+
             try:
-                status, html = await self.fetcher.fetch_text(url)
+                status, html, final_url = await self.fetcher.fetch_text(url)
+                if status in (301, 302) or final_url != url:
+                    po = urlparse(url); pf = urlparse(final_url)
+                    if po.netloc == pf.netloc:
+                        src = po.path + (f"?{po.query}" if po.query else "")
+                        dst = pf.path + (f"?{pf.query}" if pf.query else "")
+                        await redirects.add(src, dst)
+                        rewritten = await process_html(final_url, html, self.fetcher, self.state)
+                        local_path = url_to_local_path(final_url)
+                        await asyncio.to_thread(self._save_file, local_path, rewritten)
+                        await self.state.mark_downloaded(dst)
+                        await self.state.update_after_fetch(src, True)
+                        if self.progress:
+                            self.progress.update(1)
+                        print(f"[DownloadWorker {self.id}] Redirected download: {src} → {dst}")
+                        continue
+
                 if status == 200 and html:
                     try:
                         rewritten = await process_html(url, html, self.fetcher, self.state)
@@ -306,6 +312,5 @@ class DownloadWorker:
                 await self.state.update_after_fetch(url, False, str(e))
 
     def _save_file(self, path: str, data: str):
-        """Helper method to save file synchronously."""
         with open(path, "w", encoding="utf-8") as f:
             f.write(data)
