@@ -4,6 +4,9 @@ from urllib.parse import urlparse, urljoin, parse_qsl
 from bs4 import BeautifulSoup
 from assets import download_asset
 from config import CONFIG_PATH, COOKIES_PATH  # To find OUTPUT_DIR use environment or default
+from redirects import RedirectMap
+redirects = RedirectMap()
+
 
 # Default output folder consistent with assets.py
 OUTPUT_DIR = os.getenv("FORUMSMPT_BACKUP_DIR", os.path.join(os.getcwd(), "ForumSMPT"))
