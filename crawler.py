@@ -4,7 +4,9 @@ import traceback
 from urllib.parse import urljoin, urlparse, parse_qsl
 import asyncio
 from bs4 import BeautifulSoup
-
+from redirects import RedirectMap
+from redirects import redirects
+redirects = RedirectMap()
 from state import State
 from fetch import Fetcher
 from rewriter import process_html, url_to_local_path
@@ -115,7 +117,39 @@ class CrawlWorker:
             
             print(f"[Worker {self.id}] Fetching: {url}")
             try:
-                status, html = await self.fetcher.fetch_text(url)
+                status, html, final_url = await self.fetcher.fetch_text(url)
+            #— HANDLE INTERNAL REDIRECTS —
+if status in (301,302) or final_url != url:
+    parsed_orig = urlparse(url)
+    parsed_fin  = urlparse(final_url)
+    if parsed_orig.netloc == parsed_fin.netloc:
+        src = parsed_orig.path + (f"?{parsed_orig.query}" if parsed_orig.query else "")
+        dst = parsed_fin.path   + (f"?{parsed_fin.query}"  if parsed_fin.query  else "")
+        await redirects.add(src, dst)
+        # enqueue final URL if new
+        await self.state.add_url(dst)
+        # mark original done
+        await self.state.update_after_fetch(src, True)
+        print(f"[DiscoverWorker {self.id}] Redirect: {src} → {dst}")
+        continue   # skip normal parsing of html under old URL
+    
+            # Detect final URL after redirects (aiohttp gives response.url)
+            final_url = str(self.fetcher.last_final_url)  # we'll add this attr below
+            if final_url != url:
+                src_path  = urlparse(url).path + ("?"+urlparse(url).query if urlparse(url).query else "")
+                dst_path  = urlparse(final_url).path + ("?"+urlparse(final_url).query if urlparse(final_url).query else "")
+                await redirects.add(src_path, dst_path)
+                # make sure we use only the destination in state
+                await self.state.add_url(dst_path)
+                await self.state.update_after_fetch(src_path, True)  # mark original as done/ignored
+                url = final_url         # continue processing with the real page
+                print(f"[Redirect] {src_path} → {dst_path}")
+    
+                
+                
+                
+                
+                
             except Exception as e:
                 traceback.print_exc()
                 print(f"[Worker {self.id}] Exception during fetch of {url}: {e}")
@@ -187,7 +221,21 @@ class DiscoverWorker:
             print(f"[DiscoverWorker {self.id}] {url}")
             
             try:
-                status, html = await self.fetcher.fetch_text(url)
+                status, html, final_url = await self.fetcher.fetch_text(url)
+                if status in (301,302) or final_url != url:
+    po = urlparse(url); pf = urlparse(final_url)
+    src = po.path + (f"?{po.query}" if po.query else "")
+    dst = pf.path + (f"?{pf.query}" if pf.query else "")
+    await redirects.add(src, dst)
+    # process & save under final_url
+    rewritten = await process_html(final_url, html, self.fetcher, self.state)
+    local = url_to_local_path(final_url)
+    await asyncio.to_thread(self._save_file, local, rewritten)
+    await self.state.mark_downloaded(dst)
+    await self.state.update_after_fetch(src, True)
+    print(f"[DownloadWorker {self.id}] Redirected download: {src} → {dst}")
+    continue
+
                 if status == 200 and html:
                     soup = BeautifulSoup(html, "html.parser")
                     added = 0

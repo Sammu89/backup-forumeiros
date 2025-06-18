@@ -4,8 +4,8 @@ from urllib.parse import urlparse, urljoin, parse_qsl
 from bs4 import BeautifulSoup
 from assets import download_asset
 from config import CONFIG_PATH, COOKIES_PATH  # To find OUTPUT_DIR use environment or default
-from redirects import RedirectMap
-redirects = RedirectMap()
+from redirects import redirects
+
 
 
 # Default output folder consistent with assets.py
@@ -89,6 +89,10 @@ async def process_html(url: str, html: str, fetcher, state) -> str:
         
         # 1) separa fragmento
         base, *frag = abs_href.split('#', 1)
+        rel_path = urlparse(base).path + ("?"+urlparse(base).query if urlparse(base).query else "")
+        # resolve via redirect map
+        rel_path = redirects.resolve(rel_path)
+        local_target = url_to_local_path(rel_path)
         parsed = urlparse(base)
         
         if parsed.netloc.endswith(BASE_DOMAIN):

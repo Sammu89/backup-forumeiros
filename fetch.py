@@ -33,7 +33,7 @@ class Fetcher:
         await self.throttle.before_request()
         try:
             async with self.session.get(url, allow_redirects=allow_redirects) as response:
-                status = response.status
+                self.last_final_url = str(response.url)   # <── new line
                 text = await response.text(errors="ignore")
         except Exception as e:
             # Treat exceptions as server error
