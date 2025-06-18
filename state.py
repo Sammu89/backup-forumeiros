@@ -149,7 +149,7 @@ class State:
         if not entry:
             return
         if success:
-            entry["status"] = "done"
+            entry["status"] = "downloaded"
             entry["last_error"] = None
             print(f"[State] Marked done: {url}")
         else:

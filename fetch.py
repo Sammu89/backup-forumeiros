@@ -1,5 +1,5 @@
-import aiohttp
-import asyncio
+import aiohttp, asyncio
+from urllib.parse import urljoin
 from typing import Tuple, Optional
 
 class Fetcher:
@@ -24,25 +24,43 @@ class Fetcher:
             headers = {"User-Agent": self.config.user_agent}
             self.session = aiohttp.ClientSession(timeout=timeout, headers=headers, cookies=self.cookies)
 
-    async def fetch_text(self, url: str, allow_redirects: bool = True) -> Tuple[int, Optional[str], str]:
+    async def fetch_text(
+        self,
+        url: str,
+        allow_redirects: bool = True
+    ) -> Tuple[int, Optional[str], str]:
         """
-        Fetch text content (HTML) from the URL.
-        Returns (status_code, text or None on error, final_url).
+        Fetch text content from `url`.
+        If allow_redirects=False and we get 301/302, we capture the Location header
+        and return (status, None, final_url).
+        Otherwise we follow redirects and return (status, text, final_url).
         """
         await self._ensure_session()
         await self.throttle.before_request()
+
         try:
-            async with self.session.get(url, allow_redirects=allow_redirects) as response:
-                status = response.status
-                self.last_final_url = str(response.url)
-                text = await response.text(errors="ignore")
-        except Exception as e:
-            # Treat exceptions as server error
+            async with self.session.get(url, allow_redirects=allow_redirects) as resp:
+                status = resp.status
+
+                # 1) If 301/302 and we're NOT following, grab Location
+                if status in (301, 302) and not allow_redirects:
+                    loc = resp.headers.get("Location")
+                    # make it absolute
+                    final = urljoin(url, loc) if loc else url
+                    text  = None
+
+                else:
+                    # 2) normal path: follow (or single fetch), read body
+                    final = str(resp.url)
+                    text  = await resp.text(errors="ignore")
+
+        except Exception:
             status = 500
-            text = None
-            self.last_final_url = url
+            text   = None
+            final  = url
+
         self.throttle.after_response(status)
-        return status, text, self.last_final_url
+        return status, text, final
 
     async def fetch_bytes(self, url: str) -> Tuple[int, Optional[bytes]]:
         """

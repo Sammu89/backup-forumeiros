@@ -28,3 +28,5 @@ class RedirectMap:
         while path in self.map:
             path = self.map[path]          # follow chains
         return path
+# instância global, para importares em todos os lados
+redirects = RedirectMap()

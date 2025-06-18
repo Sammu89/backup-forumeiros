@@ -152,8 +152,8 @@ async def main():
 
         # Começamos apenas com 1 DiscoverWorker
         discover_tasks = []
-        first_worker = DiscoverWorker(config, state, fetcher, worker_id=1)
-        discover_tasks.append(asyncio.create_task(first_worker.run()))
+        first = DiscoverWorker(config, state, fetcher, worker_id=1)
+        discover_tasks.append(asyncio.create_task(first.run()))
 
         additional_started = False
 
@@ -162,8 +162,8 @@ async def main():
             await asyncio.sleep(1)
             pending = state.pending_count()  # novo método em state.py
             if pending >= 20:
-                print(f"[Phase-1] {pending} links pendentes → activando restantes workers…")
-                for i in range(2, config.workers + 1):
+                print(f"[Phase-1] {pending} links pendentes → activando até {max_workers} crawlers…")
+                for i in range(2, max_workers + 1):
                     w = DiscoverWorker(config, state, fetcher, worker_id=i)
                     discover_tasks.append(asyncio.create_task(w.run()))
                 additional_started = True
@@ -230,3 +230,10 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\nInterrupted. Exiting.")
+    finally:
+        # if you have a global fetcher, close it here
+        try:
+            asyncio.run(fetcher.close())
+        except:
+            pass
+
