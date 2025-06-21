@@ -28,11 +28,13 @@ from crawler import DiscoverWorker
 
 BASE_URL = "https://sm-portugal.forumeiros.com/"
 
+
 async def periodic_save(state: State, interval: int):
     while True:
         await asyncio.sleep(interval)
         await state.save()
         print("[Auto-save] State and cache saved.")
+
 
 async def main():
     parser = argparse.ArgumentParser(description="Backup ForumSMPTCrawler")
@@ -60,15 +62,15 @@ async def main():
         config.base_delay = args.delay
 
     state_file = os.path.join(os.getcwd(), "crawl_state.json")
+    final_file = state_file.replace(".json", "_final.json")
     cache_file = os.path.join(os.getcwd(), "assets_cache.json")
+    
     if args.reset:
         for fpath in (state_file, cache_file):
             if os.path.exists(fpath):
                 os.remove(fpath)
                 print(f"[Reset] Removed {fpath}")
         sys.exit(0)
-
-    final_file = state_file.replace(".json", "_final.json")
 
     cookies = get_cookies()
     # Validate existing cookies if present
@@ -103,16 +105,9 @@ async def main():
         set_cookies(cookies)
         print("[Cookies] Saved to cookies.json")
 
-    # Initialize crawl state
-    skip_crawling = False
-    if os.path.exists(final_file):
-        print("[Resume] Detected final crawl state file. Skipping discovery phase.")
-        skip_crawling = True
-        state_path_to_use = final_file
-    else:
-        state_path_to_use = state_file
-
-    state = State(config, state_path=state_path_to_use, cache_path=cache_file)
+    # Initialize crawl state (always load from main state; use final_file only to skip discovery)
+    skip_crawling = args.resume or os.path.exists(final_file)
+    state = State(config, state_path=state_file, cache_path=cache_file)
 
     # Show status and exit if requested
     if args.status:
@@ -127,7 +122,7 @@ async def main():
 
     # Seed initial URL if starting fresh
     if not state.urls and not skip_crawling:
-        await state.add_url(BASE_URL)
+        await state.add_url("/")  # usar só o path "/" como seed
         print(f"[Seed] Added initial URL to crawl: {BASE_URL}")
 
     throttle = ThrottleController(config)
@@ -145,51 +140,39 @@ async def main():
 
     # -------------------- FASE 1: DISCOVERY --------------------
     if not skip_crawling:
-        print("[Phase-1] Discovering links...")
+        print("[Phase-1] Starting discovery with 1 worker…")
 
-        # Import DiscoverWorker (assumindo que existe no módulo crawler)
         from crawler import DiscoverWorker
         max_workers = 7   # total de crawlers de descoberta desejados
 
-        # Começamos apenas com 1 DiscoverWorker
-        discover_tasks = []
-        first = DiscoverWorker(config, state, fetcher, worker_id=1)
-        discover_tasks.append(asyncio.create_task(first.run()))
+        # 1️⃣ Começa com só 1 DiscoverWorker
+        tasks = [asyncio.create_task(DiscoverWorker(config, state, fetcher, worker_id=1).run())]
+        escalated = False
 
-        additional_started = False
-
-        # Monitoriza a fila a cada segundo
-        while not additional_started:
+        # Escala para max_workers quando pendentes ≥ 20 ou o primeiro terminar
+        while not escalated:
             await asyncio.sleep(1)
-            pending = state.pending_count()  # novo método em state.py
-            if pending >= 20:
-                print(f"[Phase-1] {pending} links pendentes → activando até {max_workers} crawlers…")
+            if state.pending_count() >= 20 or tasks[0].done():
+                print(f"[Phase-1] Escalando para {max_workers} trabalhadores…")
                 for i in range(2, max_workers + 1):
-                    w = DiscoverWorker(config, state, fetcher, worker_id=i)
-                    discover_tasks.append(asyncio.create_task(w.run()))
-                additional_started = True
+                    tasks.append(asyncio.create_task(DiscoverWorker(config, state, fetcher, worker_id=i).run()))
+                escalated = True
 
-            # Caso o worker 1 acabe antes de chegar a 20 links, lançamos os outros mesmo assim
-            if discover_tasks[0].done() and not additional_started:
-                print(f"[Phase-1] Lista estabilizou antes dos 20 links → lançando até {max_workers} crawlers.")
-                for i in range(2, max_workers + 1):
-                    w = DiscoverWorker(config, state, fetcher, worker_id=i)
-                    discover_tasks.append(asyncio.create_task(w.run()))
-                additional_started = True
-
-        # Espera todos os DiscoverWorkers terminarem
-        await asyncio.gather(*discover_tasks)
+        # Espera todos os crawlers de discovery terminarem
+        await asyncio.gather(*tasks)
         print("[Phase-1] Descoberta terminada.")
 
+        # Marca estado final e copia
         await state.save()
         try:
             shutil.copy(state_file, final_file)
         except Exception as e:
             print(f"[Error] Could not save final crawl state: {e}")
+
         if shutdown_after_crawl:
-            print("Shutting down system as requested...")
+            print("Shutting down system as requested…")
             await fetcher.close()
-            if os.name == 'nt':
+            if os.name == "nt":
                 os.system("shutdown /s /t 5")
             else:
                 os.system("shutdown -h now")
@@ -206,7 +189,7 @@ async def main():
     # Import DownloadWorker (assumindo que existe no módulo crawler)
     from crawler import DownloadWorker
 
-    to_download = sum(1 for v in state.urls.values() if v["status"] == "discovered")
+    to_download = sum(1 for v in state.urls.values() if v["status"] == "listed")
     print(f"[Phase-2] Need to download {to_download} pages...")
     progress = tqdm(total=to_download, unit="page")
 
@@ -225,6 +208,7 @@ async def main():
     except Exception:
         pass
     print("Crawl complete. All state saved.")
+
 
 if __name__ == "__main__":
     fetcher = None  # Initialize fetcher variable for finally block
