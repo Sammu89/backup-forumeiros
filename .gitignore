@@ -8,6 +8,11 @@ __pycache__/
 *.py[cod]
 *.pyo
 
+
+# Ficheiros locais
+*.bak
+*.diff
+
 # Pasta com os backups HTML
 ForumSMPT/assets/
 ForumSMPT/topicos/
