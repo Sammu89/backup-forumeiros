@@ -10,7 +10,6 @@ class ThrottleController:
         self.min_delay = config.min_delay
         self.max_delay = config.max_delay
         self.max_workers = config.workers
-
         self.current_delay = self.base_delay
         self.current_workers = config.workers
         self._success_count = 0
@@ -19,17 +18,18 @@ class ThrottleController:
         """
         Await the current delay before making the next HTTP request.
         """
-        await asyncio.sleep(self.current_delay)
+        if self.current_delay > 0:
+            await asyncio.sleep(self.current_delay)
 
     def after_response(self, status_code: int):
         """
         Adjust delay and worker count based on the status code.
         - On 429 or 5xx: exponential back-off (delay x2 up to max_delay) and reduce workers by 1 (min 1).
-        - On 2xx successes: after 30 consecutive, decrease delay by 0.1s (min_min_delay)
+        - On 2xx successes: after 30 consecutive, decrease delay by 0.1s (min_delay)
           and increase workers by 1 (up to max_workers).
         """
         # Handle rate limiting and server errors
-        if status_code == 429 or (500 <= status_code < 600):
+        if status_code == 429 or 500 <= status_code < 600:
             self.current_delay = min(self.current_delay * 2, self.max_delay)
             self.current_workers = max(self.current_workers - 1, 1)
             self._success_count = 0

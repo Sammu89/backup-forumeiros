@@ -63,4 +63,4 @@ def set_cookies(cookies: Dict[str, str]) -> None:
 # Example usage:
 # config = load_config()
 # cookies = get_cookies()
-# set_cookies({"_fa-screen": "...", "fa_sm-portugal_forumeiros_com_sid": "...", ...})
+# set_cookies({"_fa-screen": "...", "fa_sid": "...", ...})

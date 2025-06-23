@@ -3,26 +3,28 @@ import hashlib
 from urllib.parse import urljoin, urlparse
 import mimetypes
 from typing import Optional
+from pathlib import Path
+import settings
 
-BASE_DOMAIN = "sm-portugal.forumeiros.com"
-BASE_URL = f"https://{BASE_DOMAIN}"
-OUTPUT_DIR = os.getenv("FORUMSMPT_BACKUP_DIR", os.path.join(os.getcwd(), "ForumSMPT"))
-IMAGES_INTERNAL_DIR = os.path.join(OUTPUT_DIR, "assets", "imagens", "internal")
-IMAGES_EXTERNAL_DIR = os.path.join(OUTPUT_DIR, "assets", "imagens", "external")
-FILES_INTERNAL_DIR = os.path.join(OUTPUT_DIR, "assets", "files", "internal")
-FILES_EXTERNAL_DIR = os.path.join(OUTPUT_DIR, "assets", "files", "external")
+def _ensure_dirs():
+    output_dir = settings.BACKUP_ROOT or Path("backup")
+    images_dir = output_dir / "assets" / "imagens" / "internal"
+    files_dir = output_dir / "assets" / "files" / "internal"
+    external_dir = output_dir / "external_files"
+    for d in (images_dir, files_dir, external_dir):
+        d.mkdir(parents=True, exist_ok=True)
+    return images_dir, files_dir, external_dir
 
-for d in (IMAGES_INTERNAL_DIR, IMAGES_EXTERNAL_DIR, FILES_INTERNAL_DIR, FILES_EXTERNAL_DIR):
-    os.makedirs(d, exist_ok=True)
 
 IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.bmp', '.ico'}
-
 
 async def download_asset(resource_url: str, fetcher, state) -> Optional[str]:
     """
     Download and cache an asset (image or file).
     Returns the local file path if successful, or None on failure.
     """
+    IMAGES_INTERNAL_DIR, FILES_INTERNAL_DIR, EXTERNAL_FILES_DIR = _ensure_dirs()
+    
     abs_url = resource_url if resource_url.startswith("http") else urljoin(BASE_URL, resource_url)
     
     existing = state.get_asset(abs_url)
@@ -37,7 +39,7 @@ async def download_asset(resource_url: str, fetcher, state) -> Optional[str]:
     
     # Se continuar vazio, tenta adivinhar
     if not ext:
-        mime, _ = mimetypes.guess_type(parsed.path)
+        mime, *_ = mimetypes.guess_type(parsed.path)
         guessed = mimetypes.guess_extension(mime or '')  # pode vir None
         ext = guessed.lower() if guessed else '.bin'
     
@@ -45,9 +47,9 @@ async def download_asset(resource_url: str, fetcher, state) -> Optional[str]:
     is_image = ext in IMAGE_EXTS
     
     if is_image:
-        base_dir = IMAGES_INTERNAL_DIR if parsed.netloc == BASE_DOMAIN else IMAGES_EXTERNAL_DIR
+        base_dir = IMAGES_INTERNAL_DIR if parsed.netloc == BASE_DOMAIN else EXTERNAL_FILES_DIR
     else:
-        base_dir = FILES_INTERNAL_DIR if parsed.netloc == BASE_DOMAIN else FILES_EXTERNAL_DIR
+        base_dir = FILES_INTERNAL_DIR if parsed.netloc == BASE_DOMAIN else EXTERNAL_FILES_DIR
     
     filename = hashlib.md5(abs_url.encode()).hexdigest() + ext
     local_path = os.path.join(base_dir, filename)
