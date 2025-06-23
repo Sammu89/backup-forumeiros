@@ -1,7 +1,0 @@
-base_delay: 0.5
-max_delay: 8.0
-min_delay: 0.3
-retry_limit: 3
-save_every: 100
-user_agent: ForumSMPTBackup/1.0
-workers: 5

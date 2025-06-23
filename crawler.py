@@ -11,7 +11,7 @@ from settings import get_base_domain, ALLOWED_PARAMS, BLACKLIST_PARAMS, IGNORED_
 from state import State
 from fetch import Fetcher
 from rewriter import process_html
-from config import load_config
+from settings import load_config
 
 
 def strip_fragment(url: str) -> str:
@@ -66,8 +66,10 @@ def url_to_local_path(url: str) -> str:
     Categories (f*), topics (t*), users (u*), groups (g*), etc.
     """
     parsed = urlparse(url)
-    path = parsed.path.lstrip("/")
-    first = path.split("/", 1)[0].lower() if path else ""
+    # ─── Special-case the site root ────────────────────────────────────────
+    if parsed.path in ("", "/"):
+        backup_root = st.BACKUP_ROOT or Path("backup")
+        return str(backup_root / "index.html")
     
     # Map URL patterns to folder names
     folder_mapping = {

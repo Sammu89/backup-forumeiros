@@ -12,6 +12,7 @@ __pycache__/
 # Ficheiros locais
 *.bak
 *.diff
+*.bat
 
 # Pasta com os backups HTML
 ForumSMPT/assets/
