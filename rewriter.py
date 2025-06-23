@@ -219,8 +219,9 @@ async def process_html(
                     status, css_content = await fetcher.fetch_text(abs_href)
                     if status == 200 and css_content:
                         processed_css = await process_css_for_fonts(css_content, abs_href, fetcher)
-                        # Save processed CSS
+                        # Save processed CSS (ensure parent dirs exist)
                         full_local_path = os.path.join(settings.BACKUP_ROOT, local_path)
+                        os.makedirs(os.path.dirname(full_local_path), exist_ok=True)
                         try:
                             with open(full_local_path, "w", encoding="utf-8") as f:
                                 f.write(processed_css)
@@ -235,8 +236,9 @@ async def process_html(
                     status, css_content = await fetcher.fetch_text(abs_href)
                     if status == 200 and css_content:
                         processed_css = await process_css_for_fonts(css_content, abs_href, fetcher)
-                        # Save processed CSS
+                        # Save processed CSS (ensure parent dirs exist)
                         full_local_path = os.path.join(settings.BACKUP_ROOT, local_path)
+                        os.makedirs(os.path.dirname(full_local_path), exist_ok=True)
                         try:
                             with open(full_local_path, "w", encoding="utf-8") as f:
                                 f.write(processed_css)

@@ -84,15 +84,27 @@ async def main():
 
     if not forum_url.startswith(("http://", "https://")):
         forum_url = "https://" + forum_url
+        
+    from urllib.parse import urlparse
 
-    # Set URL into settings
+    # Store the forum URL in settings
     st.BASE_URL = forum_url
+
+   # Now derive & store the domain
+    st.BASE_DOMAIN = urlparse(st.BASE_URL).netloc
+
 
     # ----- choose backup folder on Desktop -----
     # derive the slug (subdomain) from the BASE_URL
     slug = st.get_base_domain().split(".")[0]
     st.BACKUP_ROOT = (desktop_dir / slug).resolve()
     st.BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
+
+    # ─── Redirect config/cookies into backup folder ───────────────────
+    import config
+    # point config.yaml and cookies.json into this forum's folder
+    config.CONFIG_PATH  = str(st.BACKUP_ROOT / "config.yaml")
+    config.COOKIES_PATH = str(st.BACKUP_ROOT / "cookies.json")
 
     print(f"[Init] Target forum  : {st.BASE_URL}")
     print(f"[Init] Backup folder : {st.BACKUP_ROOT}")
@@ -104,9 +116,10 @@ async def main():
     if args.delay:
         config.base_delay = args.delay
 
-    state_file = os.path.join(os.getcwd(), "crawl_state.json")
-    final_file = state_file.replace(".json", "_final.json")
-    cache_file = os.path.join(os.getcwd(), "assets_cache.json")
+    # state & cache live inside the forum's backup folder
+    state_file = str(st.BACKUP_ROOT / "crawl_state.json")
+    final_file = str(st.BACKUP_ROOT / "crawl_state_final.json")
+    cache_file = str(st.BACKUP_ROOT / "assets_cache.json")
     
     if args.reset:
         for fpath in (state_file, cache_file):
@@ -115,38 +128,52 @@ async def main():
                 print(f"[Reset] Removed {fpath}")
         sys.exit(0)
 
-    cookies = get_cookies()
-    # Validate existing cookies if present
+    # ─── COOKIE LOADING & LOGIN CHECK ──────────────────────────────────────
+    # Only two cookies matter: fa_<domain>_data and fa_<domain>_sid
+    from settings import get_base_domain
+    raw = get_cookies()
+    domain_slug = get_base_domain().replace(".", "_")
+    data_key = f"fa_{domain_slug}_data"
+    sid_key  = f"fa_{domain_slug}_sid"
+
+    # Extract only those two (if present)
+    cookies = {}
+    if data_key in raw and sid_key in raw:
+        cookies[data_key] = raw[data_key]
+        cookies[sid_key]  = raw[sid_key]
+
+    # Verify login by fetching "/", looking for "/register" (only guests see it)
     if cookies:
-        throttle_test = ThrottleController(config)
-        fetcher_test = Fetcher(config, throttle_test, cookies)
-        status, _, _ = await fetcher_test.fetch_text(
-            "https://sm-portugal.forumeiros.com/privmsg?folder=inbox",
-            allow_redirects=False,
-        )
-        await fetcher_test.close()
-        if status == 200:
+        tc = ThrottleController(config)
+        fc = Fetcher(config, tc, cookies)
+        status, html, *_ = await fc.fetch_text(f"{st.BASE_URL}/", allow_redirects=True)
+        await fc.close()
+        if status == 200 and "/register" not in html:
             print("[Cookies] Existing cookies are valid.")
         else:
             print("[Cookies] Cookies expired or invalid.")
             cookies = {}
 
-    # Prompt for cookies if not valid
+    # Prompt only for the two needed cookies when missing/invalid
     if not cookies:
-        print("Provide the 4 cookies (_fa-screen, fa_data,")
-        print("fa_sid, fa_t):")
-        cookies["_fa-screen"] = input("_fa-screen: ").strip()
-        cookies["fa_data"] = input(
-            "fa_data: "
-        ).strip()
-        cookies["fa_sid"] = input(
-            "fa_sid: "
-        ).strip()
-        cookies["fa_t"] = input(
-            "fa_t: "
-        ).strip()
+        print(f"Provide login cookies for domain '{get_base_domain()}':")
+        cookies[data_key] = input(f"{data_key}: ").strip()
+        cookies[sid_key]  = input(f"{sid_key}: ").strip()
         set_cookies(cookies)
         print("[Cookies] Saved to cookies.json")
+
+    # ─── LOGIN VERIFICATION ─────────────────────────────────────────────────
+    # Immediately after loading cookies, verify we're actually logged in.
+    # If we still see a "/register" link, the session is anonymous.
+    login_throttle = ThrottleController(config)
+    login_fetcher  = Fetcher(config, login_throttle, cookies)
+    status, root_html, *_ = await login_fetcher.fetch_text(f"{st.BASE_URL}/", allow_redirects=True)
+    await login_fetcher.close()
+    if status == 200:
+        if '/register' in root_html:
+            print("[Warning] Login appears to have failed (found '/register'); proceeding without authentication.")
+    else:
+        print(f"[Warning] Could not verify login (status {status}); proceeding without authentication.")
 
     # Initialize crawl state (always load from main state; use final_file only to skip discovery)
     skip_crawling = args.resume or os.path.exists(final_file)
@@ -170,6 +197,7 @@ async def main():
 
     throttle = ThrottleController(config)
     fetcher = Fetcher(config, throttle, cookies)
+
     if skip_crawling:
         print(f"[Init] Skipping crawl phase. Proceeding to download with {config.workers} workers...")
     else:
@@ -252,6 +280,18 @@ async def main():
     except Exception:
         pass
     print("Crawl complete. All state saved.")
+
+    # ─── CLEAN UP TEMP FILES PROMPT ────────────────────────────────────────
+    resp = input("Delete temporary files (crawl_state.json, assets_cache.json, config.yaml, cookies.json)? (y/N): ")
+    if resp.strip().lower() in ('y', 'yes'):
+        for f in (state_file, cache_file, config.CONFIG_PATH, config.COOKIES_PATH):
+            try: 
+                os.remove(f)
+            except: 
+                pass
+        print("Temporary files deleted.")
+    else:
+        print("Temporary files retained in backup folder.")
 
 if __name__ == "__main__":
     state = None

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from redirects import redirects
 import settings as st
-from settings import ALLOWED_PARAMS, BLACKLIST_PARAMS, IGNORED_PREFIXES
+from settings import get_base_domain, ALLOWED_PARAMS, BLACKLIST_PARAMS, IGNORED_PREFIXES
 from state import State
 from fetch import Fetcher
 from rewriter import process_html
@@ -44,7 +44,7 @@ def is_valid_link(href: str) -> bool:
         return False
 
     # Domain must match exactly
-    if parsed.netloc != st.BASE_DOMAIN:
+    if parsed.netloc != get_base_domain():
         return False
 
     # Allow paths without query
@@ -89,9 +89,15 @@ def url_to_local_path(url: str) -> str:
     # Create filename slug
     slug = path.replace("/", "_") if path else "index"
     if parsed.query:
-        # Sanitize query parameters
-        query_slug = parsed.query.replace("=", "-").replace("&", "_")
+    # Sanitize query parameters (avoid “/” nesting)
+        query_slug = (
+            parsed.query
+            .replace("=", "-")
+            .replace("&", "_")
+            .replace("/", "_")
+        )
         slug += f"_{query_slug}"
+
 
     outfile = f"{slug}.html"
     
@@ -107,8 +113,11 @@ async def safe_file_write(filepath: str, content: str) -> bool:
     """Safely write content to file asynchronously."""
     try:
         def write_file():
+            # make sure the full path exists
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
+
         
         await asyncio.to_thread(write_file)
         return True

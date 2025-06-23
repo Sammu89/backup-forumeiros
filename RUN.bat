@@ -1,4 +1,4 @@
 @echo off
-python –-version
+python --version
 python main.py
 pause
